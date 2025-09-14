@@ -1,7 +1,9 @@
-export function registerSW() {
+export async function registerSW() {
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    });
+    try {
+      await navigator.serviceWorker.register('/sw.js')
+    } catch (e) {
+      console.error('SW registration failed', e)
+    }
   }
 }
