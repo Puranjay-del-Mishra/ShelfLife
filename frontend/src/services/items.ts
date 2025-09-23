@@ -134,12 +134,25 @@ export async function updateItemFields(id: string, patch: Partial<Pick<Item,
   return data as Item
 }
 
-export async function deleteItem(id: string) {
-  const { error } = await supabase.from('items').delete().eq('id', id)
-  if (error) throw error
-  return { ok: true }
+export async function deleteItem(id: string, image_path: string) {
+  // 1) Delete the row (authoritative)
+  const { error: delErr } = await supabase.from("items").delete().eq("id", id);
+  if (delErr) throw delErr;
+
+  // 2) Best-effort: remove the object (will just warn if it fails)
+  console.log(image_path);
+  await removeImage(image_path);
+
+  return { ok: true as const };
 }
 
+export async function removeImage(path?: string | null) {
+  if (!path) return; // nothing to delete
+  // Best-effort delete: don't explode the UX if it was already gone or RLS denies
+  await supabase.storage.from(BUCKET).remove([path]).catch((e) => {
+    console.warn("[removeImage] could not delete", path, e?.message || e);
+  });
+}
 // ---- Quantity helpers ----
 
 export async function setQuantity(

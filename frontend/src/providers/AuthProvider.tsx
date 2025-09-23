@@ -8,7 +8,11 @@ type AuthCtx = {
   signOut: () => Promise<void>;
 };
 
-const Ctx = createContext<AuthCtx>({ session: null, loading: true, signOut: async () => {} });
+const Ctx = createContext<AuthCtx>({
+  session: null,
+  loading: true,
+  signOut: async () => {},
+});
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -16,23 +20,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+
     supabase.auth.getSession().then(({ data }) => {
-      if (mounted) {
-        setSession(data.session ?? null);
-        setLoading(false);
-      }
+      if (!mounted) return;
+      setSession(data.session ?? null);
+      setLoading(false);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => {
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
+      setLoading(false);
     });
+
     return () => {
       sub.subscription.unsubscribe();
       mounted = false;
     };
   }, []);
 
+  async function signOut() {
+    await supabase.auth.signOut();
+  }
+
   return (
-    <Ctx.Provider value={{ session, loading, signOut: () => supabase.auth.signOut() }}>
+    <Ctx.Provider value={{ session, loading, signOut }}>
       {children}
     </Ctx.Provider>
   );
