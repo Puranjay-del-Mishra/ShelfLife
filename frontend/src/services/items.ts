@@ -14,6 +14,27 @@ function escapeLike(s: string) {
   return s.replace(/[%]/g, '\\%').replace(/[,]/g, ' ')
 }
 
+function isoToday() {
+  return new Date().toISOString().slice(0,10)
+}
+function diffDays(fromISO: string, toISO: string) {
+  const from = new Date(fromISO)
+  const to = new Date(toISO)
+  return Math.ceil((to.getTime() - from.getTime()) / (1000*60*60*24))
+}
+
+export async function updateItemFields(
+  id: string,
+  patch: Partial<Pick<Item, 'name' | 'label' | 'store' | 'storage' | 'acquired_at'>>
+) {
+  const { error } = await supabase
+    .from('items')
+    .update(patch, { returning: 'minimal' }) // ⬅️ key change
+    .eq('id', id);
+  if (error) throw error;
+  return { ok: true as const };
+}
+
 export async function listItems(params: {
   q?: string
   storage?: Storage[]
@@ -71,26 +92,44 @@ export async function getItemById(id: string) {
   return data as Item
 }
 
+export async function setDaysLeft(id: string, days: number | null) {
+  const update: Partial<Item> = { days_left: days, updated_at: new Date().toISOString() };
+  const { error } = await supabase
+    .from('items')
+    .update(update, { returning: 'minimal' }) // ⬅️
+    .eq('id', id);
+  if (error) throw error;
+  return { ok: true as const };
+}
+
+
 export async function createItem(input: {
   name: string
+  label?: string | null
   store?: string | null
   storage?: Storage
   acquired_at?: string // YYYY-MM-DD
+  days_left?: number | null
+  initial_days_left?: number | null
 }) {
   const { data, error } = await supabase
     .from('items')
     .insert({
       name: input.name,
+      label: (input.label ?? input.name),          // ensure non-null label for UI
       store: input.store ?? null,
       storage: input.storage ?? 'counter',
       acquired_at: input.acquired_at ?? new Date().toISOString().slice(0, 10),
       image_path: 'pending',
+      days_left: input.days_left ?? null,          // allow seeding
+      initial_days_left: input.initial_days_left ?? null,
     })
     .select('*')
     .single()
   if (error) throw error
   return data as Item
 }
+
 
 export async function setItemImagePath(itemId: string, userId: string) {
   const path = buildImagePath(userId, itemId)
@@ -126,45 +165,42 @@ export async function analyze(itemId: string) {
   return { ok: true }
 }
 
-export async function updateItemFields(id: string, patch: Partial<Pick<Item,
-  'name' | 'store' | 'storage' | 'acquired_at'
->>) {
-  const { data, error } = await supabase.from('items').update(patch).eq('id', id).select('*').single()
-  if (error) throw error
-  return data as Item
+export async function deleteItem(id: string, image_path: string) {
+  // 1) Delete the row (authoritative)
+  const { error: delErr } = await supabase.from("items").delete().eq("id", id);
+  if (delErr) throw delErr;
+
+  // 2) Best-effort: remove the object (will just warn if it fails)
+  console.log(image_path);
+  await removeImage(image_path);
+
+  return { ok: true as const };
 }
 
-export async function deleteItem(id: string) {
-  const { error } = await supabase.from('items').delete().eq('id', id)
-  if (error) throw error
-  return { ok: true }
+export async function removeImage(path?: string | null) {
+  if (!path) return; // nothing to delete
+  // Best-effort delete: don't explode the UX if it was already gone or RLS denies
+  await supabase.storage.from(BUCKET).remove([path]).catch((e) => {
+    console.warn("[removeImage] could not delete", path, e?.message || e);
+  });
 }
-
 // ---- Quantity helpers ----
 
 export async function setQuantity(
   id: string,
-  input: {
-    qty_type: Item['qty_type']
-    qty_unit: string
-    qty_value: number
-    estimated?: boolean
-  }
+  input: { qty_type: Item['qty_type']; qty_unit: string; qty_value: number; estimated?: boolean }
 ) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('items')
     .update({
       qty_type: input.qty_type,
       qty_unit: input.qty_unit,
       qty_value: input.qty_value,
       qty_is_estimated: input.estimated ?? false,
-    })
-    .eq('id', id)
-    .select('id')
-  if (error) throw error
-  // If trigger deleted row (qty <= 0), this select would be empty
-  if (!data || data.length === 0) return { deleted: true as const }
-  return { ok: true as const }
+    }, { returning: 'minimal' }) // ⬅️
+    .eq('id', id);
+  if (error) throw error;
+  return { ok: true as const };
 }
 
 /**
@@ -175,38 +211,46 @@ export async function adjustQuantity(
   id: string,
   opts: { delta: number; unit?: string }
 ) {
-  // 1) read current quantities
+  // 1) Read current quantities (may be missing if already deleted)
   const { data: item, error } = await supabase
     .from('items')
     .select('id, qty_type, qty_unit, qty_value')
     .eq('id', id)
-    .single()
-  if (error) throw error
-  if (!item) return { deleted: true as const }
+    .maybeSingle();
+  if (error) throw error;
+  if (!item) return { deleted: true as const };
 
-  const unit = opts.unit ?? item.qty_unit
-  let deltaInDisplay = opts.delta
+  const currentUnit = item.qty_unit;
+  const targetUnit = opts.unit ?? currentUnit;
+  let deltaInDisplay = opts.delta;
 
-  if (unit && unit !== item.qty_unit) {
-    // Convert delta from 'unit' -> current display unit
-    const convertedToBase = between(Math.abs(opts.delta), unit, UNIT_BASE_TYPE(item.qty_type), item.qty_type) // helper below
-    const backToDisplay = between(convertedToBase, UNIT_BASE_TYPE(item.qty_type), item.qty_unit, item.qty_type)
-    deltaInDisplay = opts.delta < 0 ? -backToDisplay : backToDisplay
+  // 2) Convert delta from targetUnit -> displayUnit (currentUnit), if needed
+  if (targetUnit && targetUnit !== currentUnit) {
+    const base = UNIT_BASE_TYPE(item.qty_type);
+    const toBase = between(Math.abs(opts.delta), targetUnit, base, item.qty_type);
+    const backToDisplay = between(toBase, base, currentUnit, item.qty_type);
+    deltaInDisplay = opts.delta < 0 ? -backToDisplay : backToDisplay;
   }
 
-  const newQty = Math.max(0, round4(item.qty_value + deltaInDisplay))
-  const { data: after, error: upErr } = await supabase
-    .from('items')
-    .update({ qty_value: newQty, qty_is_estimated: false })
-    .eq('id', id)
-    .select('id')
-  if (upErr) throw upErr
+  // 3) Compute new qty (clamped to >= 0)
+  const current = typeof item.qty_value === 'number' ? item.qty_value : 0;
+  const newQty = Math.max(0, round4(current + deltaInDisplay));
 
-  if (!after || after.length === 0 || newQty === 0) {
-    // row likely deleted by trigger
-    return { deleted: true as const }
+  // 4) Persist (no returning to avoid 406 under RLS)
+  try {
+    await supabase
+      .from('items')
+      .update({ qty_value: newQty, qty_is_estimated: false }, { returning: 'minimal' })
+      .eq('id', id);
+  } catch (e: any) {
+    // If a trigger deleted the row or RLS blocks returning, treat going-to-zero as deleted.
+    if (newQty === 0) return { deleted: true as const };
+    throw e;
   }
-  return { ok: true as const }
+
+  // 5) UI hint: if zero, callers should remove the card
+  if (newQty === 0) return { deleted: true as const };
+  return { ok: true as const };
 }
 
 function round4(n: number) {
