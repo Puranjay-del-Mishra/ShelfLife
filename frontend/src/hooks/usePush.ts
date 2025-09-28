@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react'
 import { registerDevice, unregisterDevice } from '@/services/notify'
-import { getUser } from '@/services/auth'
-import { supabase } from '@/lib/supabase'
-import { BUCKET } from '@/lib/env'
 
 const VAPID = import.meta.env.VITE_VAPID_PUBLIC_KEY
 
