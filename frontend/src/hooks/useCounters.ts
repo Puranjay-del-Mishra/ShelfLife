@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getCounters } from "@/services/stats"; // ⬅️ adjust to "../services/stats" if you don't use "@"
 
-export function useCounters() {
+// hooks/useCounters.ts
+export function useCounters(opts?: { enabled?: boolean }) {
+  const enabled = opts?.enabled ?? true;
   return useQuery({
-    queryKey: ["counters"],
+    queryKey: ['counters'],
     queryFn: getCounters,
-    staleTime: 60_000,            // cache for 1 min
-    refetchOnWindowFocus: false,  // avoid spammy refetches
+    enabled, // only runs when enabled is true
   });
 }
+

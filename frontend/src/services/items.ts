@@ -10,7 +10,6 @@ export function buildImagePath(userId: string, itemId: string) {
 }
 
 function escapeLike(s: string) {
-  // Escape % and , which have meaning in PostgREST or()
   return s.replace(/[%]/g, '\\%').replace(/[,]/g, ' ')
 }
 
@@ -20,20 +19,14 @@ export async function updateItemFields(
   id: string,
   patch: Partial<Pick<Item, 'name' | 'label' | 'store' | 'storage' | 'acquired_at'>>
 ) {
-  const { error } = await supabase
-    .from('items')
-    .update(patch, { returning: 'minimal' }) // return nothing → avoids RLS 406
-    .eq('id', id)
+  const { error } = await supabase.from('items').update(patch).eq('id', id) // ← removed { returning: 'minimal' }
   if (error) throw error
   return { ok: true as const }
 }
 
 export async function setDaysLeft(id: string, days: number | null) {
   const update: Partial<Item> = { days_left: days, updated_at: new Date().toISOString() }
-  const { error } = await supabase
-    .from('items')
-    .update(update, { returning: 'minimal' })
-    .eq('id', id)
+  const { error } = await supabase.from('items').update(update).eq('id', id) // ← removed options
   if (error) throw error
   return { ok: true as const }
 }
@@ -75,7 +68,7 @@ export async function listItems(params: {
       q = q.order('name', { ascending: true })
       break
     default:
-      q = q.order('created_at', { ascending: false }) // 'recent'
+      q = q.order('created_at', { ascending: false })
   }
 
   q = q.range(from, to)
@@ -104,7 +97,7 @@ export async function createItem(input: {
   label?: string | null
   store?: string | null
   storage?: Storage
-  acquired_at?: string // YYYY-MM-DD
+  acquired_at?: string
   days_left?: number | null
   initial_days_left?: number | null
 }) {
@@ -112,7 +105,7 @@ export async function createItem(input: {
     .from('items')
     .insert({
       name: input.name,
-      label: (input.label ?? input.name),               // ensure non-null label
+      label: input.label ?? input.name,
       store: input.store ?? null,
       storage: input.storage ?? 'counter',
       acquired_at: input.acquired_at ?? new Date().toISOString().slice(0, 10),
@@ -188,29 +181,21 @@ export async function setQuantity(
 ) {
   const { error } = await supabase
     .from('items')
-    .update(
-      {
-        qty_type: input.qty_type,
-        qty_unit: input.qty_unit,
-        qty_value: input.qty_value,
-        qty_is_estimated: input.estimated ?? false,
-      },
-      { returning: 'minimal' }
-    )
+    .update({
+      qty_type: input.qty_type,
+      qty_unit: input.qty_unit,
+      qty_value: input.qty_value,
+      qty_is_estimated: input.estimated ?? false,
+    })
     .eq('id', id)
   if (error) throw error
   return { ok: true as const }
 }
 
-/**
- * Adjust by delta in the given 'unit' (default: current display unit).
- * If new quantity reaches 0, DB trigger deletes the row → we return {deleted: true}.
- */
 export async function adjustQuantity(
   id: string,
   opts: { delta: number; unit?: string }
 ) {
-  // 1) read current quantities
   const { data: item, error } = await supabase
     .from('items')
     .select('id, qty_type, qty_unit, qty_value')
@@ -223,7 +208,6 @@ export async function adjustQuantity(
   const targetUnit = opts.unit ?? currentUnit
   let deltaInDisplay = opts.delta
 
-  // convert delta between units if needed
   if (targetUnit && targetUnit !== currentUnit) {
     const base = UNIT_BASE_TYPE(item.qty_type)
     const toBase = between(Math.abs(opts.delta), targetUnit, base, item.qty_type)
@@ -234,10 +218,9 @@ export async function adjustQuantity(
   const current = typeof item.qty_value === 'number' ? item.qty_value : 0
   const newQty = Math.max(0, round4(current + deltaInDisplay))
 
-  // persist (no returning → safer under RLS)
   const { error: upErr } = await supabase
     .from('items')
-    .update({ qty_value: newQty, qty_is_estimated: false }, { returning: 'minimal' })
+    .update({ qty_value: newQty, qty_is_estimated: false })
     .eq('id', id)
   if (upErr) throw upErr
 
