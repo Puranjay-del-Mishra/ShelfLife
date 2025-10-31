@@ -9,4 +9,7 @@
 
 **/.edge-secrets.env
 
-frontend/supabase/.temp/
+frontend/supabase/.temp/.env
+*.env
+backend/.env
+backend/bin/
