@@ -1,5 +1,5 @@
 // src/components/sheets/AddEditItemSheet.tsx
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import {
   createItem,
@@ -8,6 +8,7 @@ import {
   setDaysLeft,
 } from '@/services/items'
 import type { Item, Storage } from '@/types/domain'
+import { elapsedDays } from '@/lib/date'
 
 type Mode = 'add' | 'edit'
 
@@ -34,13 +35,13 @@ export function AddEditItemSheet({
   )
 
   // days_left as string so "" = unset
-  const [daysLeftStr, setDaysLeftStr] = useState<string>('') 
+  const [daysLeftStr, setDaysLeftStr] = useState<string>('')
   const [initialDaysLeftStr, setInitialDaysLeftStr] = useState<string>('')
 
   const [qtyType, setQtyType] =
     useState<'count' | 'weight' | 'volume' | 'bunch' | 'other'>('count')
   const [qtyUnit, setQtyUnit] = useState('ea')
-  // IMPORTANT: keep quantity as string to avoid '' -> 0 coercion
+  // keep quantity as string to avoid '' -> 0 coercion
   const [qtyValueStr, setQtyValueStr] = useState<string>('1')
 
   const [saving, setSaving] = useState(false)
@@ -96,14 +97,14 @@ export function AddEditItemSheet({
     if (!t) return null // treat blank as "no change / use default on add"
     const n = Number(t)
     if (!Number.isFinite(n)) return null
-    // BLOCK zero to avoid accidental deletes via DB trigger
+    // block zero to avoid accidental deletes via DB trigger
     if (n === 0) return null
     return Math.max(0, n)
   }
 
   const newLabel = label || name || 'Unlabeled'
 
-  // dirty flags
+  // ---- dirty flags ----
   const coreChanged =
     mode === 'edit' && item
       ? (name || '') !== (item.name ?? '') ||
@@ -126,10 +127,11 @@ export function AddEditItemSheet({
         (qtyType !== item.qty_type ||
           qtyUnit !== item.qty_unit ||
           qtyParsed !== item.qty_value)
-      : // in add mode, we will seed quantity if user gave a valid value
+      : // in add mode, seed quantity if user gave a valid value
         mode === 'add' && qtyParsed != null
 
-  const isDirty = mode === 'add' ? true : coreChanged || daysChanged || qtyChanged
+  const isDirty =
+    mode === 'add' ? true : coreChanged || daysChanged || qtyChanged
 
   // ---- actions ----
   const onSave = useCallback(async () => {
@@ -167,7 +169,14 @@ export function AddEditItemSheet({
         return
       }
 
-      if (!item) return
+      // edit mode
+      if (!item) {
+        setSaving(false)
+        onClose()
+        return
+      }
+
+      const acquiredChanged = (item.acquired_at ?? '') !== acquired
 
       if (coreChanged) {
         await updateItemFields(item.id, {
@@ -181,6 +190,14 @@ export function AddEditItemSheet({
 
       if (daysChanged) {
         await setDaysLeft(item.id, parseDaysOrNull(daysLeftStr))
+      } else if (acquiredChanged) {
+        // Recompute days_left when Acquired changed but Days left wasn't edited
+        const baseLife =
+          (item as any).initial_days_left ?? item.days_left ?? null
+        if (typeof baseLife === 'number') {
+          const recomputed = Math.max(0, baseLife - elapsedDays(acquired))
+          await setDaysLeft(item.id, recomputed)
+        }
       }
 
       if (qtyChanged && qtyParsed != null) {
@@ -195,7 +212,7 @@ export function AddEditItemSheet({
       setSaving(false)
       onSaved?.()
       onClose()
-    } catch {
+    } catch (e) {
       setSaving(false)
       onClose()
     }
@@ -214,6 +231,8 @@ export function AddEditItemSheet({
     qtyParsed,
     onClose,
     onSaved,
+    coreChanged,
+    daysChanged,
   ])
 
   const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
