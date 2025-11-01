@@ -13,3 +13,7 @@ frontend/supabase/.temp/.env
 *.env
 backend/.env
 backend/bin/
+.env
+*.env
+backend/.env
+backend/bin/
