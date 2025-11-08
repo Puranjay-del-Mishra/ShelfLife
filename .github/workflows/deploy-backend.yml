@@ -16,31 +16,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build backend binary
-        run: |
-          go version || sudo apt-get update && sudo apt-get install -y golang
-          go build -o shelflife-backend ./cmd/api
-
-      - name: Copy backend binary to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "shelflife-backend"
-          target: "/home/ec2-user"
-
-      - name: Move binary into place & restart service
+      - name: SSH into EC2 and deploy backend
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            # Go to app directory
+            cd /home/ec2-user/ShelfLife
+
+            # Ensure repo exists (first deploy safety)
+            if [ ! -d .git ]; then
+              git clone git@github.com:Puranjay-del-Mishra/ShelfLife.git .
+            else
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # Ensure Go is installed
+            if ! command -v go >/dev/null 2>&1; then
+              sudo yum install -y golang || (sudo apt-get update && sudo apt-get install -y golang)
+            fi
+
+            # Build backend binary
+            go build -o /home/ec2-user/shelflife-backend ./cmd/api
+
+            # Move binary into place
             sudo mv /home/ec2-user/shelflife-backend /usr/local/bin/shelflife-backend
             sudo chmod +x /usr/local/bin/shelflife-backend
+
+            # Restart backend service
             sudo systemctl daemon-reload
             sudo systemctl restart shelflife-backend
+
