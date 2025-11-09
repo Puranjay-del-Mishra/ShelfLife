@@ -16,16 +16,22 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}     # set this to ssm-user in repo secrets
-          key: ${{ secrets.EC2_SSH_KEY }}       # private key you created as ssm-user
+          username: ${{ secrets.EC2_USER }}      # ssm-user
+          key: ${{ secrets.EC2_SSH_KEY }}        # private key created on the instance
           script: |
             set -e
 
-            # Ensure working dir
-            mkdir -p /home/ssm-user/ShelfLife
-            cd /home/ssm-user/ShelfLife
+            REPO_DIR="/home/ssm-user/ShelfLife"
+            BACKEND_DIR="$REPO_DIR/backend"
+            GO_VERSION="1.25.3"
+            GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
+            GO_URL="https://go.dev/dl/${GO_TARBALL}"
 
-            # Clone or update repo (HTTPS → no SSH key needed on instance)
+            # Ensure base dir
+            mkdir -p "$REPO_DIR"
+            cd "$REPO_DIR"
+
+            # Clone or update repo via HTTPS to avoid extra SSH keys on EC2
             if [ ! -d .git ]; then
               git clone https://github.com/Puranjay-del-Mishra/ShelfLife.git .
             else
@@ -33,23 +39,129 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # Build backend from module
-            cd backend
+            # Ensure we have a recent-enough Go
+            if command -v go >/dev/null 2>&1; then
+              echo "Existing Go: $(go version || true)"
+            else
+              echo "No Go found, installing..."
+            fi
 
-            # Install Go if missing
+            NEED_GO_INSTALL=0
             if ! command -v go >/dev/null 2>&1; then
-              if command -v yum >/dev/null 2>&1; then
-                sudo yum install -y golang
-              else
-                sudo apt-get update
-                sudo apt-get install -y golang
+              NEED_GO_INSTALL=1
+            else
+              # Parse current version: go version go1.24.8 linux/amd64
+              CURRENT_GO=$(go version | awk '{print $3}' | sed 's/go//')
+              # naive compare: if current < required, reinstall
+              if [ "$(printf '%s\n' "$GO_VERSION" "$CURRENT_GO" | sort -V | head -n1)" != "$GO_VERSION" ]; then
+                NEED_GO_INSTALL=1
               fi
             fi
 
-            # Build binary to a temp location
-            go build -o /tmp/shelflife-backend ./cmd/api
+            if [ "$NEED_GO_INSTALL" -eq 1 ]; then
+              echo "Installing Go ${GO_VERSION}..."
+              wget -q "$GO_URL" -O "/tmp/${GO_TARBALL}"
+              sudo rm -rf /usr/local/go
+              sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+              rm -f "/tmp/${GO_TARBALL}"
 
-            # Move binary into place for systemd service (runs as ec2-user or root)
+              # Ensure /usr/local/go/bin is on PATH for this session
+              export PATH="/usr/local/go/bin:$PATH"
+            fi
+
+            echo "Go in use: $(go version)"
+
+            # Build backend
+            cd "$BACKEND_DIR"
+            /usr/local/go/bin/go build -o /tmp/shelflife-backend ./cmd/api
+
+            # Move binary into place for systemd (expects this path)
+            sudo mv /tmp/shelflife-backend /usr/local/bin/shelflife-backend
+            sudo chmod +x /usr/local/bin/shelflife-backend
+
+            # Reload and restart backend service
+            sudo systemctl daemon-reload
+            sudo systemctl restart shelflife-backend
+
+            echo "Deploy complete."
+name: Deploy Backend
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: SSH into EC2 and deploy backend
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}      # ssm-user
+          key: ${{ secrets.EC2_SSH_KEY }}        # private key created on the instance
+          script: |
+            set -e
+
+            REPO_DIR="/home/ssm-user/ShelfLife"
+            BACKEND_DIR="$REPO_DIR/backend"
+            GO_VERSION="1.25.3"
+            GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
+            GO_URL="https://go.dev/dl/${GO_TARBALL}"
+
+            # Ensure base dir
+            mkdir -p "$REPO_DIR"
+            cd "$REPO_DIR"
+
+            # Clone or update repo via HTTPS to avoid extra SSH keys on EC2
+            if [ ! -d .git ]; then
+              git clone https://github.com/Puranjay-del-Mishra/ShelfLife.git .
+            else
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            # Ensure we have a recent-enough Go
+            if command -v go >/dev/null 2>&1; then
+              echo "Existing Go: $(go version || true)"
+            else
+              echo "No Go found, installing..."
+            fi
+
+            NEED_GO_INSTALL=0
+            if ! command -v go >/dev/null 2>&1; then
+              NEED_GO_INSTALL=1
+            else
+              # Parse current version: go version go1.24.8 linux/amd64
+              CURRENT_GO=$(go version | awk '{print $3}' | sed 's/go//')
+              # naive compare: if current < required, reinstall
+              if [ "$(printf '%s\n' "$GO_VERSION" "$CURRENT_GO" | sort -V | head -n1)" != "$GO_VERSION" ]; then
+                NEED_GO_INSTALL=1
+              fi
+            fi
+
+            if [ "$NEED_GO_INSTALL" -eq 1 ]; then
+              echo "Installing Go ${GO_VERSION}..."
+              wget -q "$GO_URL" -O "/tmp/${GO_TARBALL}"
+              sudo rm -rf /usr/local/go
+              sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+              rm -f "/tmp/${GO_TARBALL}"
+
+              # Ensure /usr/local/go/bin is on PATH for this session
+              export PATH="/usr/local/go/bin:$PATH"
+            fi
+
+            echo "Go in use: $(go version)"
+
+            # Build backend
+            cd "$BACKEND_DIR"
+            /usr/local/go/bin/go build -o /tmp/shelflife-backend ./cmd/api
+
+            # Move binary into place for systemd (expects this path)
             sudo mv /tmp/shelflife-backend /usr/local/bin/shelflife-backend
             sudo chmod +x /usr/local/bin/shelflife-backend
 
