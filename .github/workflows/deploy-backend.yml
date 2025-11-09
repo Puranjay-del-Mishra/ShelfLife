@@ -16,24 +16,27 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          username: ${{ secrets.EC2_USER }}     # set this to ssm-user in repo secrets
+          key: ${{ secrets.EC2_SSH_KEY }}       # private key you created as ssm-user
           script: |
-            # Go to app directory
-            cd /home/ec2-user/ShelfLife
+            set -e
 
-            # Ensure repo exists (first deploy safety)
+            # Ensure working dir
+            mkdir -p /home/ssm-user/ShelfLife
+            cd /home/ssm-user/ShelfLife
+
+            # Clone or update repo (HTTPS → no SSH key needed on instance)
             if [ ! -d .git ]; then
-              git clone git@github.com:Puranjay-del-Mishra/ShelfLife.git .
+              git clone https://github.com/Puranjay-del-Mishra/ShelfLife.git .
             else
               git fetch origin main
               git reset --hard origin/main
             fi
 
-            # Build backend binary from the backend module
+            # Build backend from module
             cd backend
 
-            # Ensure Go is installed (Amazon Linux vs Ubuntu)
+            # Install Go if missing
             if ! command -v go >/dev/null 2>&1; then
               if command -v yum >/dev/null 2>&1; then
                 sudo yum install -y golang
@@ -43,13 +46,16 @@ jobs:
               fi
             fi
 
-            go build -o /home/ec2-user/shelflife-backend ./cmd/api
+            # Build binary to a temp location
+            go build -o /tmp/shelflife-backend ./cmd/api
 
-            # Move binary into place
-            sudo mv /home/ec2-user/shelflife-backend /usr/local/bin/shelflife-backend
+            # Move binary into place for systemd service (runs as ec2-user or root)
+            sudo mv /tmp/shelflife-backend /usr/local/bin/shelflife-backend
             sudo chmod +x /usr/local/bin/shelflife-backend
 
-            # Restart backend service
+            # Reload and restart backend service
             sudo systemctl daemon-reload
             sudo systemctl restart shelflife-backend
+
+            echo "Deploy complete."
 
