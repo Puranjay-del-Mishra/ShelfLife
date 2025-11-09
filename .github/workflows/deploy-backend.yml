@@ -4,12 +4,8 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'go.mod'
-      - 'go.sum'
+      - 'backend/**'
       - '.github/workflows/deploy-backend.yml'
-      - '.env'
 
 jobs:
   deploy:
@@ -34,12 +30,19 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # Ensure Go is installed
+            # Build backend binary from the backend module
+            cd backend
+
+            # Ensure Go is installed (Amazon Linux vs Ubuntu)
             if ! command -v go >/dev/null 2>&1; then
-              sudo yum install -y golang || (sudo apt-get update && sudo apt-get install -y golang)
+              if command -v yum >/dev/null 2>&1; then
+                sudo yum install -y golang
+              else
+                sudo apt-get update
+                sudo apt-get install -y golang
+              fi
             fi
 
-            # Build backend binary
             go build -o /home/ec2-user/shelflife-backend ./cmd/api
 
             # Move binary into place

@@ -1,0 +1,158 @@
+frontend
+├── .env.example
+├── .env.test
+├── .gitignore
+├── README.md
+├── ShelfLife
+├── eslint.config.js
+├── index.html
+├── package-lock.json
+├── package.json
+├── public
+│   ├── manifest.webmanifest
+│   ├── robots.txt
+│   └── vite.svg
+├── src
+│   ├── App.css
+│   ├── app
+│   │   ├── App.tsx
+│   │   └── routes.tsx
+│   ├── assets
+│   │   └── react.svg
+│   ├── components
+│   │   ├── auth
+│   │   │   └── SignInOverlay.tsx
+│   │   ├── capture
+│   │   │   └── CameraCapture.tsx
+│   │   ├── common
+│   │   │   ├── ConfirmDialog.tsx
+│   │   │   ├── DaysLeftBadge.tsx
+│   │   │   ├── EmptyState.tsx
+│   │   │   ├── IconButton.tsx
+│   │   │   ├── NotificationBell.tsx
+│   │   │   ├── QuantityAdjust.tsx
+│   │   │   ├── QuantityBadge.tsx
+│   │   │   ├── SearchBar.tsx
+│   │   │   ├── SignOutButton.tsx
+│   │   │   ├── SkeletonCard.tsx
+│   │   │   ├── SortDropdown.tsx
+│   │   │   ├── StagePill.tsx
+│   │   │   ├── StatusDot.tsx
+│   │   │   ├── StorageChip.tsx
+│   │   │   ├── Toast.tsx
+│   │   │   └── filters
+│   │   │       ├── StageFilter.tsx
+│   │   │       ├── StatusFilter.tsx
+│   │   │       └── StorageFilter.tsx
+│   │   ├── dashboard
+│   │   │   ├── AddEditItemSheet.tsx
+│   │   │   ├── AddProduceFlow.tsx
+│   │   │   ├── CardGrid.tsx
+│   │   │   ├── ProduceCard.tsx
+│   │   │   ├── StatsStrip.tsx
+│   │   │   └── UpdatePhotoSheet.tsx
+│   │   ├── layout
+│   │   │   ├── InstallBanner.tsx
+│   │   │   ├── PushBanner.tsx
+│   │   │   ├── SideNav.tsx
+│   │   │   └── TopBar.tsx
+│   │   └── settings
+│   │       ├── AccountSection.tsx
+│   │       ├── DataSection.tsx
+│   │       ├── DefaultsSection.tsx
+│   │       ├── NotificationsSection.tsx
+│   │       └── PrivacySection.tsx
+│   ├── constants
+│   │   ├── __tests__
+│   │   │   └── units.test.ts
+│   │   ├── stages.ts
+│   │   ├── storage.ts
+│   │   └── units.ts
+│   ├── hooks
+│   │   ├── __tests__
+│   │   │   └── useUpdatePhoto.test.tsx
+│   │   ├── useAddItem.ts
+│   │   ├── useAuthGuard.ts
+│   │   ├── useCounters.ts
+│   │   ├── useDebounced.ts
+│   │   ├── useFiltersState.ts
+│   │   ├── useInstallPrompt.ts
+│   │   ├── useItems.ts
+│   │   ├── usePush.ts
+│   │   └── useUpdatePhoto.ts
+│   ├── index.css
+│   ├── lib
+│   │   ├── cn.ts
+│   │   ├── date.ts
+│   │   ├── edge.ts
+│   │   ├── env.ts
+│   │   ├── supabase.ts
+│   │   └── time.ts
+│   ├── main.tsx
+│   ├── pages
+│   │   ├── AuthCallbackPage.tsx
+│   │   ├── DashboardPage.tsx
+│   │   ├── SettingsPage.tsx
+│   │   └── SignInPage.tsx
+│   ├── providers
+│   │   ├── AuthProvider.tsx
+│   │   ├── DialogProvider.tsx
+│   │   ├── QueryProvider.tsx
+│   │   └── ToastProvider.tsx
+│   ├── pwa
+│   │   ├── registerSW.ts
+│   │   └── sw.ts
+│   ├── scripts
+│   │   ├── audit-frontend.mjs
+│   │   └── bootstrap-all-stubs.sh
+│   ├── services
+│   │   ├── __tests__
+│   │   │   └── items.test.ts
+│   │   ├── auth.ts
+│   │   ├── createItemFromAnalysis.ts
+│   │   ├── filters.ts
+│   │   ├── image.ts
+│   │   ├── items.ts
+│   │   ├── notify.ts
+│   │   ├── realtime.ts
+│   │   ├── stats.ts
+│   │   └── urlState.ts
+│   ├── state
+│   │   └── notifications.tsx
+│   ├── styles
+│   │   └── globals.css
+│   ├── types
+│   │   └── domain.ts
+│   └── vite-env.d.ts
+├── supabase
+│   ├── .temp
+│   │   ├── cli-latest
+│   │   ├── gotrue-version
+│   │   ├── pooler-url
+│   │   ├── postgres-version
+│   │   ├── project-ref
+│   │   ├── rest-version
+│   │   └── storage-version
+│   └── functions
+│       ├── __shared
+│       │   └── cors.ts
+│       ├── analyze
+│       │   └── index.ts
+│       ├── notify
+│       │   └── index.ts
+│       └── supabase
+│           └── .temp
+│               ├── cli-latest
+│               ├── gotrue-version
+│               ├── pooler-url
+│               ├── postgres-version
+│               ├── project-ref
+│               ├── rest-version
+│               └── storage-version
+├── tsconfig.app.json
+├── tsconfig.json
+├── tsconfig.node.json
+├── vite.config.ts
+└── vitest.config.ts
+
+35 directories, 120 files
