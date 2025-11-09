@@ -1,53 +1,111 @@
-import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+// src/pages/SettingsPage.tsx
+import { useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { useAuth } from "@/providers/AuthProvider";
+import { backend } from "@/lib/backend";
+
+import { AccountSection } from "@/components/settings/AccountSection";
+import { DefaultsSection } from "@/components/settings/DefaultsSection";
+import { NotificationsSection } from "@/components/settings/NotificationsSection";
+import { DataSection } from "@/components/settings/DataSection";
+import { PrivacySection } from "@/components/settings/PrivacySection";
+
+import type { UserSettings } from "@/components/settings/types";
+
+const FALLBACK_SETTINGS: UserSettings = {
+  notify_local_time: "09:00:00",
+  timezone: "America/New_York",
+  notify_days_before: [3, 1, 0],
+  push_enabled: true,
+};
 
 export function SettingsPage() {
-  const [enabled, setEnabled] = useState(true)
-  const [hour, setHour] = useState(9)
-  const [min, setMin] = useState(0)
-  const [saving, setSaving] = useState(false)
+  const { session } = useAuth();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    // load from public.users
-    supabase.auth.getUser().then(async ({ data }) => {
-      const uid = data.user?.id
-      if (!uid) return
-      const { data: row } = await supabase.from('users').select('*').eq('id', uid).single()
-      if (row) {
-        setEnabled(row.notify_enabled ?? true)
-        setHour(row.notify_hour ?? 9)
-        setMin(row.notify_min ?? 0)
-      }
-    })
-  }, [])
+  const { data, isLoading } = useQuery<UserSettings>({
+    queryKey: ["settings"],
+    queryFn: async () => {
+      const res = await backend.getSettings();
+      return {
+        notify_local_time: res.notify_local_time,
+        timezone: res.timezone,
+        notify_days_before: res.notify_days_before,
+        push_enabled: res.push_enabled,
+      };
+    },
+    enabled: !!session,
+  });
 
-  async function save() {
-    setSaving(true)
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-    await supabase.from('users').update({
-      notify_enabled: enabled, notify_hour: hour, notify_min: min, notify_tz: tz
-    }).eq('id', (await supabase.auth.getUser()).data.user!.id)
-    setSaving(false)
+  const settings: UserSettings = useMemo(
+    () => data ?? FALLBACK_SETTINGS,
+    [data]
+  );
+
+  const saveMutation = useMutation({
+    mutationFn: async (next: UserSettings) =>
+      backend.updateSettings({
+        notify_local_time: next.notify_local_time,
+        timezone: next.timezone,
+        notify_days_before: next.notify_days_before,
+        push_enabled: next.push_enabled,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
+  const patch = (p: Partial<UserSettings>) =>
+    queryClient.setQueryData<UserSettings>(
+      ["settings"],
+      (prev) => ({
+        ...(prev ?? FALLBACK_SETTINGS),
+        ...p,
+      })
+    );
+
+  if (!session) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 py-6">
+        <h1 className="text-2xl font-semibold">Settings</h1>
+        <p className="mt-2 text-sm text-neutral-500">
+          Please sign in to manage your preferences.
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="p-4 max-w-xl">
-      <div className="text-xl font-semibold mb-3">Settings</div>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div>Push notifications</div>
-          <input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)} />
+    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Settings</h1>
+          <p className="text-sm text-neutral-500">
+            Control how ShelfLife behaves for your account.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label>Time</label>
-          <select value={hour} onChange={e=>setHour(Number(e.target.value))}>{Array.from({length:24}).map((_,h)=><option key={h} value={h}>{h.toString().padStart(2,'0')}</option>)}</select>
-          :
-          <select value={min} onChange={e=>setMin(Number(e.target.value))}>{[0,15,30,45].map(m=><option key={m} value={m}>{m.toString().padStart(2,'0')}</option>)}</select>
-        </div>
-        <div className="flex justify-end">
-          <button className="px-3 py-1.5 rounded bg-black text-white" onClick={save} disabled={saving}>Save</button>
-        </div>
+        <button
+          type="button"
+          onClick={() => saveMutation.mutate(settings)}
+          disabled={saveMutation.isPending || isLoading}
+          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {saveMutation.isPending ? "Saving..." : "Save changes"}
+        </button>
       </div>
+
+      {isLoading && !data ? (
+        <div className="text-sm text-neutral-500">Loading your settings…</div>
+      ) : (
+        <>
+          <AccountSection />
+          <DefaultsSection settings={settings} onChange={patch} />
+          <NotificationsSection settings={settings} onChange={patch} />
+          <DataSection settings={settings} />
+          <PrivacySection />
+        </>
+      )}
     </div>
-  )
+  );
 }

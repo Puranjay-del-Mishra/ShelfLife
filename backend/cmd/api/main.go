@@ -7,10 +7,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
 	"backend/internal/auth"
 	mydb "backend/internal/db"
+	"backend/internal/ws"
 )
 
 func main() {
@@ -31,11 +33,28 @@ func main() {
 	r.Use(gin.Recovery())
 	_ = r.SetTrustedProxies(nil) // silence "trusted all proxies" warning
 
+	// CORS: keep tight in prod
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:5173",
+			// "https://your-frontend-domain.com",
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{},
+		AllowCredentials: false, // we use Bearer tokens, not cookies
+		MaxAge:           12 * time.Hour,
+	}))
+
 	// Liveness
 	r.GET("/healthz", func(c *gin.Context) {
 		c.String(http.StatusOK, "ok")
 	})
 
+	// Realtime hub
+	hub := ws.NewHub()
+
+	// --- Authenticated REST API group ---
 	api := r.Group("/v1")
 	api.Use(auth.Middleware())
 
@@ -79,9 +98,9 @@ func main() {
 		userID := c.GetString(auth.UserIDKey)
 
 		var in struct {
-			NotifyLocalTime  string  `json:"notify_local_time"`   // "HH:MM" or "HH:MM:SS"
-			Timezone         string  `json:"timezone"`            // IANA TZ, e.g. "America/New_York"
-			NotifyDaysBefore []int32 `json:"notify_days_before"`  // e.g. [3,1,0]
+			NotifyLocalTime  string  `json:"notify_local_time"`  // "HH:MM" or "HH:MM:SS"
+			Timezone         string  `json:"timezone"`           // IANA TZ, e.g. "America/New_York"
+			NotifyDaysBefore []int32 `json:"notify_days_before"` // e.g. [3,1,0]
 			PushEnabled      bool    `json:"push_enabled"`
 		}
 		if err := c.BindJSON(&in); err != nil {
@@ -110,8 +129,11 @@ func main() {
 		}
 
 		// ensure row exists, then update
-		_, _ = pool.Exec(c, `insert into public.user_settings (user_id) values ($1)
-		                     on conflict (user_id) do nothing`, userID)
+		_, _ = pool.Exec(c, `
+			insert into public.user_settings (user_id)
+			values ($1)
+			on conflict (user_id) do nothing
+		`, userID)
 
 		if _, err := pool.Exec(c, `
 			update public.user_settings
@@ -125,7 +147,6 @@ func main() {
 			return
 		}
 
-		// return saved row
 		var out struct {
 			UserID           string  `json:"user_id"`
 			NotifyLocalTime  string  `json:"notify_local_time"`
@@ -145,6 +166,14 @@ func main() {
 			c.String(http.StatusInternalServerError, err.Error())
 			return
 		}
+		hub.SendToUser(userID, []byte(`{
+			"type": "notification",
+			"notice": {
+				"kind": "info",
+				"title": "Settings saved",
+				"body": "Your notification preferences were updated."
+			}
+		}`))
 		c.JSON(http.StatusOK, out)
 	})
 
@@ -171,24 +200,26 @@ func main() {
 
 		ua := c.GetHeader("User-Agent")
 
-		// idempotent upsert on (user_id, endpoint)
 		if _, err := pool.Exec(c, `
 			insert into public.web_push_subscriptions
 			  (user_id, endpoint, p256dh, auth, user_agent, platform)
 			values ($1, $2, $3, $4, $5, $6)
 			on conflict (user_id, endpoint) do update
-			  set p256dh = excluded.p256dh,
-			      auth = excluded.auth,
-			      user_agent = excluded.user_agent,
-			      platform = excluded.platform,
-			      last_seen_at = now(),
-			      updated_at = now()
+			  set p256dh      = excluded.p256dh,
+			      auth        = excluded.auth,
+			      user_agent  = excluded.user_agent,
+			      platform    = excluded.platform,
+			      last_seen_at= now(),
+			      updated_at  = now()
 		`, userID, in.Endpoint, in.Keys.P256dh, in.Keys.Auth, ua, in.Platform); err != nil {
 			c.String(http.StatusInternalServerError, err.Error())
 			return
 		}
 		c.Status(http.StatusNoContent)
 	})
+
+	// --- WebSocket under /v1/ws (auth via Supabase JWT in query param) ---
+	ws.RegisterRoutes(r.Group("/v1"), hub)
 
 	log.Printf("listening on :%s", port)
 	if err := r.Run(":" + port); err != nil {
