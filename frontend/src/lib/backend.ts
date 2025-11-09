@@ -1,14 +1,17 @@
 // src/lib/backend.ts
 import { supabase } from "@/lib/supabase";
 
-const RAW_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
+const isBrowser = typeof window !== "undefined";
 
-// Normalize so we don't end up with double slashes
-const BASE =
-  RAW_BASE.endsWith("/") ? RAW_BASE.slice(0, -1) : RAW_BASE;
+const RAW_BASE =
+  // Explicit override (use ONLY for local dev or special cases)
+  import.meta.env.VITE_BACKEND_URL
+    // Fallback: same-origin (works on EC2 behind Nginx)
+    || (isBrowser ? window.location.origin : "http://localhost:8080");
+
+const BASE = RAW_BASE.replace(/\/+$/, "");
 
 async function authFetch(path: string, init: RequestInit = {}) {
-  // ensure we have a Supabase session
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
   const token = data.session?.access_token;
@@ -27,9 +30,7 @@ async function authFetch(path: string, init: RequestInit = {}) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(
-      `Backend ${res.status}: ${text || res.statusText}`
-    );
+    throw new Error(`Backend ${res.status}: ${text || res.statusText}`);
   }
 
   return res;

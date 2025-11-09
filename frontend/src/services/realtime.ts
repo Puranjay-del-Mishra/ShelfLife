@@ -1,7 +1,11 @@
 // src/services/realtime.ts
 import { supabase } from "@/lib/supabase";
 
-const HTTP_BASE = import.meta.env.VITE_BACKEND_URL || "http://localhost:8080";
+const isBrowser = typeof window !== "undefined";
+
+const HTTP_BASE =
+  import.meta.env.VITE_BACKEND_URL
+    || (isBrowser ? window.location.origin : "http://localhost:8080");
 
 function makeWsUrl(path: string) {
   const u = new URL(path, HTTP_BASE);
@@ -55,7 +59,6 @@ async function ensureConnection() {
 
     ws.onclose = () => {
       ws = null;
-      // lightweight reconnect: only if there are listeners
       if (listeners.size > 0) {
         setTimeout(() => {
           if (listeners.size > 0) ensureConnection();
@@ -64,17 +67,13 @@ async function ensureConnection() {
     };
 
     ws.onerror = () => {
-      // error handled via onclose
+      // handled by onclose
     };
   } finally {
     connecting = false;
   }
 }
 
-/**
- * Subscribe to realtime messages.
- * Returns an unsubscribe function.
- */
 export function subscribeRealtime(listener: Listener): () => void {
   listeners.add(listener);
   void ensureConnection();
