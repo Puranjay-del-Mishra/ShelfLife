@@ -38,6 +38,8 @@ func main() {
 		AllowOrigins: []string{
 			"http://localhost:5173",
 			"http://54.221.169.199",
+			"https://shelflife.work",
+        	"https://www.shelflife.work",
 			// "https://your-frontend-domain.com",
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "OPTIONS"},
